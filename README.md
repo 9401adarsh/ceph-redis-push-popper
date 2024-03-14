@@ -18,7 +18,7 @@ The files for push and pop can be found in the `src` folder.
 Before running the files, you need to start redis.
 
 ```
-sudo systemtcl start redis
+sudo systemctl start redis
 ```
 
 On a separate terminal, compile the clients separately as follows:
