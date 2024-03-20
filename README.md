@@ -24,8 +24,8 @@ sudo systemctl start redis
 On a separate terminal, compile the clients separately as follows:
 
 ```
-g++ redis-pusher.cpp -o redis-pusher -I /path/to/boost_1_84_0 -lpthread -lssl -lcrypto -lboost_system -lboost_thread 
-g++ redis.popper.cpp -o redis-popper -I /path/to/boost_1_84_0 -lpthread -lssl -lcrypto -lboost_system -lboost_thread
+g++ redis-pusher.cpp -o redis-pusher -I /path/to/boost_1_84_0 -lpthread -lssl -lcrypto
+g++ redis.popper.cpp -o redis-popper -I /path/to/boost_1_84_0 -lpthread -lssl -lcrypto
 ```
 
 You can ignore the -I flag, if the default boost library in your system is of version 1.84.0 or higher.
