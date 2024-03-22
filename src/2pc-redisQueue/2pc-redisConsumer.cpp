@@ -35,6 +35,8 @@ iv) Locks for the resources, need to think on how to proceed.
 #include <cstdlib>
 #include <ctime>
 
+#include "redlock-cpp/redlock.h"
+
 namespace asio = boost::asio;
 namespace redis = boost::redis;
 
@@ -58,24 +60,17 @@ notifDeliveryStatus performNotificationDelivery(std::string notif)
 {
     std::cout << "Performing Notification Delivery... Notif: " + notif << std::endl;
     notifDeliveryStatus status;
-    sleep(10);
+
+    srand(time(nullptr));
+    sleep(rand() % 5);
 
     // Assuming the notification delivery system fails 5% of the time.
-    srand(time(nullptr));
     if (rand() % 3 == 0)
         status = NACK;
     else
         status = ACK;
 
     return status;
-}
-
-void accquireLock()
-{
-}
-
-void releaseLock()
-{
 }
 
 void deleteNotification(asio::io_context &eventThread, redis::config &cfg, std::string redisResource, std::string notif)
@@ -127,27 +122,24 @@ void fetchNotification(asio::io_context &eventThread, redis::config &cfg, std::s
             std::vector<std::string> notifVec = std::get<0>(resp).value(); 
             if(notifVec.size() < 5)
             {
- 
                 std::cout<<"Not enough notifications on the commit Queue, waiting for atleast 5 notifications to commit...."<<std::endl;
-                asio::io_context childEventThread;
-                fetchNotification(childEventThread, cfg, redisResource);
-
+                sleep(2);
             }
             else {
 
                 for(auto &notif: notifVec)
                 {   
                     notifDeliveryStatus status = performNotificationDelivery(notif);
-                if(status == ACK) {
+                    if(status == ACK) {
                     
-                    std::cout<<"Notification ACKed. Deleting notif from the queue"<<std::endl;
-                    asio::io_context childEventThread; 
-                    deleteNotification(childEventThread, cfg, redisResource, notif);
+                        std::cout<<"Notification ACKed. Deleting notif from the queue"<<std::endl;
+                        asio::io_context childEventThread; 
+                        deleteNotification(childEventThread, cfg, redisResource, notif);
 
-                }
-                else {
-                    std::cout<<"Notification NACKed. Will have to try again later..."<<std::endl;
-                }
+                    }
+                    else {
+                        std::cout<<"Notification NACKed. Will have to try again later..."<<std::endl;
+                    }
 
                 }
                 
@@ -161,23 +153,66 @@ void fetchNotification(asio::io_context &eventThread, redis::config &cfg, std::s
     return;
 }
 
-void consumerThread(redis::config &cfg, std::string redisResource)
+void consumerThread(redis::config &cfg)
 {
     asio::io_context eventThread;
-    fetchNotification(eventThread, cfg, redisResource);
+    fetchNotification(eventThread, cfg, "topic:commit");
 }
 
-int main()
+void consumerThread(redis::config &cfg, CRedLock *dlm)
 {
+    bool operationDone = false;
+    while (operationDone != true)
+    {
+
+        bool reserveDone = false;
+        bool commitOrAbortDone = false;
+
+        CLock redisLock;
+        bool hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+        if (hasRedisLock)
+        {
+
+            asio::io_context eventThread;
+            fetchNotification(eventThread, cfg, "topic:commit");
+
+            dlm->Unlock(redisLock);
+        }
+        else
+        {
+            std::cout << "Waiting to get lock for accessing redis server..." << std::endl;
+            sleep(1);
+        }
+    }
+}
+
+int main(int argc, char *argv[])
+{
+
+    bool useDistributedLocks = true;
+
+    if (argc > 1)
+    {
+        std::string checkMode = argv[1];
+        useDistributedLocks = checkMode == "noLocks" ? false : true;
+    }
 
     auto cfg = redisConfigSetup("127.0.0.1", "6379");
 
-    int i = 1;
+    CRedLock *dlm = new CRedLock();
+    dlm->AddServerUrl("127.0.0.1", 6379);
+
+    int i = 1; 
     while (true)
     {
-        std::cout << "Run " << i++ << std::endl;
-        consumerThread(cfg, "topic:commit");
-        sleep(3);
+        std::cout << "Run No:" << i++ << std::endl;
         std::cout << "---------------------" << std::endl;
+        if (useDistributedLocks)
+            consumerThread(cfg, dlm);
+        else
+            consumerThread(cfg);
+        std::cout << "---------------------" << std::endl;
+        sleep(1);
     }
 }

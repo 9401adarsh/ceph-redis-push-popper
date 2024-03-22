@@ -33,10 +33,13 @@ iii) Account for commit operation failures in those cases, log the commmit opera
 #include <boost/redis/response.hpp>
 #include <boost/redis/config.hpp>
 #include <boost/asio/detached.hpp>
+
 #include <iostream>
 #include <cstdlib>
 #include <ctime>
 #include <random>
+
+#include "redlock-cpp/redlock.h"
 
 namespace asio = boost::asio;
 namespace redis = boost::redis;
@@ -86,10 +89,10 @@ std::pair<std::string, radosOperationStatus> doRadosOperation(std::string radosR
     // random hardcoded payload string, that mimics as output of the rados operation.
     std::string payload = radosRequestString;
 
-    sleep(10);
-    // Assuming Rados Operation fails 5% of the time.
-
     srand(time(nullptr));
+    sleep(rand() % 4);
+
+    // Assuming Rados Operation fails 5% of the time.
     if (rand() % 20 == 0)
         status = RGW_OP_FAILURE;
     else
@@ -122,13 +125,12 @@ void reserveOperation(asio::io_context &eventThread, redis::config &cfg, std::st
     conn.async_run(cfg, {}, asio::detached);
     conn.async_exec(req, resp, [&](auto errorCode, auto)
                     {
-    if (!errorCode)
-        std::cout << "Space Reserved on Reserve Queue. Last Request String: " + radosRequestString<<std::endl;
-        conn.cancel(); });
+                        if (!errorCode)
+                            std::cout << "Space Reserved on Reserve Queue. Last Request String: " + radosRequestString << std::endl;
+                        conn.cancel();
+                    });
 
     eventThread.run();
-
-    return;
 }
 
 void commitOrAbortOperation(asio::io_context &eventThread, redis::config &cfg, std::pair<std::string, std::string> redisResources, std::pair<std::string, radosOperationStatus> radosOperationOutput)
@@ -147,7 +149,7 @@ void commitOrAbortOperation(asio::io_context &eventThread, redis::config &cfg, s
     if (status == RGW_OP_SUCCESS)
     {
 
-        std::cout << "Rados Operation Successful..." << std::endl;
+        std::cout << "Rados Operation Succeeded..." << std::endl;
         redis::response<std::string, redis::ignore_t> resp;
 
         req.push("RPOPLPUSH", tmpQueue, commitQueue);
@@ -156,8 +158,11 @@ void commitOrAbortOperation(asio::io_context &eventThread, redis::config &cfg, s
         conn.async_run(cfg, {}, asio::detached);
         conn.async_exec(req, resp, [&](auto errorCode, auto)
                         {
+        
         if (!errorCode)
             std::cout << "Commiting Notif:" << std::get<0>(resp).value() << std::endl;
+        else
+            std::cout << errorCode << std::endl;
         conn.cancel(); });
 
         eventThread.run();
@@ -180,6 +185,8 @@ void commitOrAbortOperation(asio::io_context &eventThread, redis::config &cfg, s
     }
 }
 
+// Normal Mode without Locks...
+
 void producerThread(redis::config &cfg)
 {
 
@@ -194,15 +201,87 @@ void producerThread(redis::config &cfg)
     commitOrAbortOperation(commitOrAbortOpCtxt, cfg, {"topic:reserve", "topic:commit"}, radosOutput);
 }
 
-int main()
+// Producer with Lock Support - An Attempt with Distributed Locks using redlock CPP
+
+void producerThread(redis::config &cfg, CRedLock *dlm)
 {
+
+    std::string radosRequest = getRandomString();
+    bool operationDone = false;
+    while (operationDone != true)
+    {
+
+        bool reserveDone = false;
+        bool commitOrAbortDone = false;
+
+        CLock redisLock;
+        bool hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+        if (hasRedisLock)
+        {
+            asio::io_context reserveOpCtxt;
+            reserveOperation(reserveOpCtxt, cfg, "topic:reserve", radosRequest);
+
+            dlm->Unlock(redisLock);
+
+            auto radosOutput = doRadosOperation(radosRequest);
+            reserveDone = true;
+
+            while (commitOrAbortDone != true)
+            {
+                hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+                if (hasRedisLock)
+                {
+                    asio::io_context commitOrAbortOpCtxt;
+                    commitOrAbortOperation(commitOrAbortOpCtxt, cfg, {"topic:reserve", "topic:commit"}, radosOutput);
+
+                    dlm->Unlock(redisLock);
+                    commitOrAbortDone = true;
+                }
+                else
+                {
+                    std::cout << "Waiting to get locks for doing commit" << std::endl;
+                    sleep(1);
+                }
+            }
+            operationDone = reserveDone && commitOrAbortDone;
+        }
+        else
+        {
+            std::cout << "Waiting to get lock for accessing redis server." << std::endl;
+            sleep(1);
+        }
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    bool useDistributedLocks = true;
+
+    if (argc > 1)
+    {
+        std::string checkMode = argv[1];
+        useDistributedLocks = checkMode == "noLocks" ? false : true;
+    }
+
     auto cfg = redisConfigSetup("127.0.0.1", "6379");
+
+    CRedLock *dlm1 = new CRedLock();
+    dlm1->AddServerUrl("127.0.0.1", 6379);
+
+    int i = 1;
     while (true)
     {
-        producerThread(cfg);
 
+        std::cout << "Run No: " << i++ << std::endl;
+        std::cout << "---------------------" << std::endl;
+        if (useDistributedLocks)
+            producerThread(cfg, dlm1);
+        else
+            producerThread(cfg);
         std::cout << "-----------------" << std::endl;
-        sleep(3);
+        sleep(1);
     }
 
     return 0;
