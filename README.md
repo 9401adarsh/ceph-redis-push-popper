@@ -84,4 +84,132 @@ echo "Usage: ./build/2pc-consumer.o [optional argument for no locks to be used: 
 echo "Ex: ./build/2pc-consumer.o noLocks (no locks for redis resource in this mode)" 
 ```
 
+### 2 Phase Commit Queue - Basic Proof Of Concept
 
+The 2PC Queue was devised based on the info provided here. 
+
+#### Producer
+- The producer deals with two Redis Queues - `topic:reserve` & `topic:commit`
+- First a reservation made in `topic:reserve` using `LPUSH`. Then the RADOS operation    occurs
+- If the operation was successful, we use `RPOPLPUSH` to move this notif to the `topic:commit`
+- Else, we remove the reserved space on `topic:reserve` using `LREM`
+
+#### Consumer
+- The consumer only deals with a single Redis Queue - `topic:commit`
+- Consumer only removes notifs from the queue when there are atleast 5 notifications on the queue - Removes it as a batch of 5 always, this is checked using `LRANGE`.
+- The removal is done with `LREM` for each notification, if the notification is ACKED. 
+- In case of NACK, the notification will remain in the queue to be processed later.
+
+### An attempt at distributed locks
+
+An attempt at distributed locks has been made by using the redlock-cpp library.
+
+The idea is that both consumers will accquire lock to the redis server in order for them to do the operations. 
+
+For this attempt, I have used one Distribured Lock Manager which manages locks for the redis-server listening on `127.0.0.1:6379`. 
+
+```
+CRedLock *dlm = new CRedLock();
+dlm->AddServerUrl("127.0.0.1", 6379);
+
+#Acquiring the lock
+CLock redisLock;
+bool hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+#Releasing the lock
+dlm->Unlock(redisLock);
+```
+
+Code snippets for locks follow: 
+
+`producer.cpp`
+
+```
+void producerThread(redis::config &cfg, CRedLock *dlm)
+{
+
+    std::string radosRequest = getRandomString();
+    bool operationDone = false;
+    while (operationDone != true)
+    {
+
+        bool reserveDone = false;
+        bool commitOrAbortDone = false;
+
+        CLock redisLock;
+        bool hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+        if (hasRedisLock)
+        {
+            asio::io_context reserveOpCtxt;
+            reserveOperation(reserveOpCtxt, cfg, "topic:reserve", radosRequest);
+
+            dlm->Unlock(redisLock);
+
+            auto radosOutput = doRadosOperation(radosRequest);
+            reserveDone = true;
+
+            while (commitOrAbortDone != true)
+            {
+                hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+                if (hasRedisLock)
+                {
+                    asio::io_context commitOrAbortOpCtxt;
+                    commitOrAbortOperation(commitOrAbortOpCtxt, cfg, {"topic:reserve", "topic:commit"}, radosOutput);
+
+                    dlm->Unlock(redisLock);
+                    commitOrAbortDone = true;
+                }
+                else
+                {
+                    std::cout << "Waiting to get locks for doing commit" << std::endl;
+                    sleep(1);
+                }
+            }
+            operationDone = reserveDone && commitOrAbortDone;
+        }
+        else
+        {
+            std::cout << "Waiting to get lock for accessing redis server." << std::endl;
+            sleep(1);
+        }
+    }
+}
+
+```
+`consumer.cpp`
+
+```
+void consumerThread(redis::config &cfg, CRedLock *dlm)
+{
+    bool operationDone = false;
+    while (operationDone != true)
+    {
+
+        bool reserveDone = false;
+        bool commitOrAbortDone = false;
+
+        CLock redisLock;
+        bool hasRedisLock = dlm->Lock("redisServer", 10, redisLock);
+
+        if (hasRedisLock)
+        {
+
+            asio::io_context eventThread;
+            fetchNotification(eventThread, cfg, "topic:commit");
+
+            dlm->Unlock(redisLock);
+        }
+        else
+        {
+            std::cout << "Waiting to get lock for accessing redis server..." << std::endl;
+            sleep(1);
+        }
+    }
+}
+```
+
+### Notes
+
+- Until now, Redis doensn't offer the flexibility to lock only a particular resource. If we have to accquire a lock, we'll have to block the entire redis-server. This might cause an issue when we try to scale up. 
