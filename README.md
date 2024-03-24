@@ -102,7 +102,7 @@ The 2PC Queue was devised based on the info provided here.
 
 ### An attempt at distributed locks
 
-An attempt at distributed locks has been made by using the redlock-cpp library.
+An attempt at distributed locks has been made by using the redlock-cpp library. [Repo Link] (https://github.com/jacket-code/redlock-cpp)
 
 The idea is that both consumers will accquire lock to the redis server in order for them to do the operations. 
 
