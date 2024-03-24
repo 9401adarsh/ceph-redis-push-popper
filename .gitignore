@@ -1,3 +1,4 @@
 .vscode
-src/standardRedisQueue/redis-popper
-src/standardRedisQueue/redis-pusher
+build/
+src/redlock-cpp/bin/
+docker commands
