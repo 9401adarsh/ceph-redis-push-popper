@@ -8,6 +8,8 @@
 
 ### Instructions to Run and Setup
 
+First clone this git repository using `git clone https://github.com/9401adarsh/ceph-redis-push-popper/`
+
 On Local: 
 
 You'll need to have the following pre-requisites to run the project on your local machine. 
@@ -62,7 +64,6 @@ Inside the container session, now run the following commands
 ```
 bash ./install-deps.sh
 bash ./compile-files.sh
-
 ```
 Meanwhile on another terminal, run this command to start the redis-server in the container.
 
@@ -81,7 +82,6 @@ echo "2 PC Redis Queue Usage"
 echo "Usage: ./buid/2pc-producer.o [optional argument for no locks to be used: noLocks]" 
 echo "Usage: ./build/2pc-consumer.o [optional argument for no locks to be used: noLocks]"
 echo "Ex: ./build/2pc-consumer.o noLocks (no locks for redis resource in this mode)" 
-
 ```
 
 
