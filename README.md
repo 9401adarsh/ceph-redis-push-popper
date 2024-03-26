@@ -33,8 +33,8 @@ To run the files:
 
 ```
 "Standard Redis Queue Usage"
-echo "Usage: ./build/conusmer.o [HOST] [PORT] [Name of Queue] [optional: Number of Elements to Pop]"
-echo "Usage: ./build/producer.o [HOST] [PORT] [Name of Queue] [list of elements to push]"
+echo "Usage: ./build/conusmer.o [Name of Queue] [optional: Number of Elements to Pop]"
+echo "Usage: ./build/producer.o [Name of Queue] [list of elements to push]"
 
 echo "2 PC Redis Queue Usage"
 echo "Usage: ./buid/2pc-producer.o [optional argument for no locks to be used: noLocks]" 
