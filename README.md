@@ -8,9 +8,9 @@
 
 ### Instructions to Run and Setup
 
-On Local: 
-
 First clone the repository using `git clone --recursive https://www.github.com/9401adarsh/ceph-redis-push-popper`
+
+On Local: 
 
 You'll need to have the following pre-requisites to run the project on your local machine. 
 
