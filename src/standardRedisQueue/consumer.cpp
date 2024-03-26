@@ -44,8 +44,20 @@ auto main(int argc, char * argv[])-> int
         conn.async_run(cfg, {}, asio::detached);
 
         conn.async_exec(req, resp, [&](auto ec, auto) {
-         if (!ec)
-            std::cout << "Popped the following element:  "<< std::get<0>(resp).value()[0] << std::endl;
+         if (!ec){ 
+            std::vector<std::string> poppedElements = std::get<0>(resp).value();
+
+            if(poppedElements.size() > 0)
+            {    
+                std::cout << "Popped the following elements: ";
+                for(auto &x: std::get<0>(resp).value())
+                    std::cout<<x<<"\t";
+                std::cout<<std::endl;
+            }
+            else 
+                std::cout << "Queue is empty, nothing to pop."<< std::endl;   
+         }
+            
          conn.cancel();
         });
 

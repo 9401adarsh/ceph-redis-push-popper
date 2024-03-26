@@ -1,4 +1,3 @@
 .vscode
 build/
 src/redlock-cpp/bin/
-docker commands
